@@ -16,10 +16,6 @@ add_action( 'rest_api_init', function () {
 } );
 
 function wpec_braintree_auth_connect( WP_REST_Request $request ) {
-	global $merchant_return;
-
-	$secret = md5( 'client_secret$sandbox$5901187800ab76ef4917aaacc34c053f' );
-
 	require_once( 'includes/braintree/lib/Braintree.php' );
 
 	$gateway = new Braintree_Gateway([
@@ -27,14 +23,12 @@ function wpec_braintree_auth_connect( WP_REST_Request $request ) {
 		'clientSecret' => 'client_secret$sandbox$5901187800ab76ef4917aaacc34c053f'
 	]);
 
-	$merchant_return = isset( $request['redirect'] ) ? $request['redirect'] : '';
-
 	if ( isset( $request['Auth'] ) && $request['Auth'] == 'WPeCBraintree' ) {
 
 		$url = $gateway->oauth()->connectUrl([
 			'redirectUri' => 'https://wpecommerce.org/wp-json/wpec/v1/braintree',
 			'scope' => 'read_write',
-			'state' => $secret,
+			'state' => md5( esc_url( $request['business_website'] ) ),
 			'landingPage' => 'signup',
 			'user' => [
 				'country' => 'USA',
@@ -50,6 +44,10 @@ function wpec_braintree_auth_connect( WP_REST_Request $request ) {
 			]
 		]);
 
+		//Store the client return URL
+		$client_site = md5( esc_url( $request['business_website'] ) );
+		set_transient( 'wpec_braintree_client_return_' . $client_site , $request['redirect'], 4 * HOUR_IN_SECONDS );
+
 		$data = array();
 		// Create the response object
 		$response = new WP_REST_Response( $data );
@@ -64,10 +62,26 @@ function wpec_braintree_auth_connect( WP_REST_Request $request ) {
 	}
 
 	//Connect return URI process
-	if ( isset( $request['state'] ) && $request['state'] == $secret ) {
+	if ( isset( $request['state'] ) && $request['state'] != '' ) {
+
+		//Validate returned state param
+		$return_url = get_transient( 'wpec_braintree_client_return_' . $request['state'] );
+
+		if ( false == $return_url ) {
+			return;
+		}
+
+		delete_transient( 'wpec_braintree_client_return_' . $request['state'] );
+
 		$result = $gateway->oauth()->createTokenFromCode([
 			'code' => $request['code']
 		]);
+
+		$query_args = array(
+			'access_token' => $result->credentials->accessToken,
+		);
+
+		$return_url = add_query_arg( $query_args, $return_url );
 
 		$data = array();
 
@@ -77,35 +91,11 @@ function wpec_braintree_auth_connect( WP_REST_Request $request ) {
 		// Add a custom status code
 		$response->set_status( 200 );
 
-		var_dump($merchant_return);
-		exit;
 		// Add a custom header
-		$response->header( 'Location', $merchant_return );
+		$response->header( 'Location', $return_url );
 
 		return $response;			
 	}
 
 	return new WP_Error( 'access_denied', 'Access denied', array( 'status' => 404 ) );
-	
-	
-	/*
-	// You can access parameters via direct array access on the object:
-	$param = $request['some_param'];
-
-	// Or via the helper method:
-	$param = $request->get_param( 'some_param' );
-
-	// You can get the combined, merged set of parameters:
-	$parameters = $request->get_params();
-
-	// The individual sets of parameters are also available, if needed:
-	$parameters = $request->get_url_params();
-	$parameters = $request->get_query_params();
-	$parameters = $request->get_body_params();
-	$parameters = $request->get_json_params();
-	$parameters = $request->get_default_params();
-
-	// Uploads aren't merged in, but can be accessed separately:
-	$parameters = $request->get_file_params();
-	*/
 }
