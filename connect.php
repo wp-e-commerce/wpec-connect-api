@@ -24,7 +24,6 @@ function wpec_braintree_auth_connect( WP_REST_Request $request ) {
 	]);
 
 	if ( isset( $request['Auth'] ) && $request['Auth'] == 'WPeCBraintree' ) {
-
 		$url = $gateway->oauth()->connectUrl([
 			'redirectUri' => 'https://wpecommerce.org/wp-json/wpec/v1/braintree',
 			'scope' => 'read_write',
@@ -66,6 +65,7 @@ function wpec_braintree_auth_connect( WP_REST_Request $request ) {
 
 		//Validate returned state param
 		$return_url = get_transient( 'wpec_braintree_client_return_' . $request['state'] );
+		$return_url =  html_entity_decode( base64_decode( $return_url ) );
 
 		if ( false == $return_url ) {
 			return;
@@ -78,10 +78,10 @@ function wpec_braintree_auth_connect( WP_REST_Request $request ) {
 		]);
 
 		$query_args = array(
-			'access_token' => $result->credentials->accessToken,
+			'access_token' => base64_encode( $result->credentials->accessToken ),
 		);
 
-		$return_url = add_query_arg( $query_args, $return_url );
+		$return_url = add_query_arg( 'access_token', $query_args['access_token'], $return_url );
 
 		$data = array();
 
@@ -89,12 +89,12 @@ function wpec_braintree_auth_connect( WP_REST_Request $request ) {
 		$response = new WP_REST_Response( $data );
 
 		// Add a custom status code
-		$response->set_status( 200 );
+		$response->set_status( 302 );
 
 		// Add a custom header
 		$response->header( 'Location', $return_url );
 
-		return $response;			
+		return $response;
 	}
 
 	return new WP_Error( 'access_denied', 'Access denied', array( 'status' => 404 ) );
